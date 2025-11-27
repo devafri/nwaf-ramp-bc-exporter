@@ -4,13 +4,17 @@ from typing import Dict, List, Optional
 from urllib.parse import urljoin
 
 class RampClient:
-    def __init__(self, base_url: str, token_url: str, client_id: str, client_secret: str):
+    def __init__(self, base_url: str, token_url: str, client_id: str, client_secret: str, enable_sync: bool = False):
         self.base_url = base_url.rstrip('/')
         self.token_url = token_url
         self.client_id = client_id
         self.client_secret = client_secret
         self.session = requests.Session()
         self._token = None
+        # When enable_sync is True, mark_transaction_synced will perform a POST against
+        # Ramp's sync endpoint. Default is False to avoid accidental writes.
+        self.enable_sync = enable_sync
+        self.granted_scopes = None
 
 
     def authenticate(self):
@@ -26,8 +30,8 @@ class RampClient:
         self._token = data.get("access_token")
         
         # Log which scopes were actually granted (if available in response)
-        granted_scopes = data.get("scope", "unknown")
-        print(f"🔑 OAuth token granted with scopes: {granted_scopes}")
+        self.granted_scopes = data.get("scope", "")
+        print(f"🔑 OAuth token granted with scopes: {self.granted_scopes}")
         
         self.session.headers.update({"Authorization": f"Bearer {self._token}"})
         return self._token
@@ -71,10 +75,52 @@ class RampClient:
         NOTE: Currently in testing mode - does not actually update Ramp.
         Requires accounting:write scope to be enabled.
         """
-        # TESTING MODE: Do not actually mark as synced
-        print(f"🔍 [TESTING] Would mark transaction {transaction_id} as synced (sync_reference: {sync_reference})")
-        print("💡 To enable actual syncing, remove the testing safeguard in mark_transaction_synced()")
-        return True  # Pretend it worked for testing purposes
+        # If not enabled, behave as dry-run so we don't update production accidentally
+        if not getattr(self, 'enable_sync', False):
+            print(f"🔍 [DRY RUN] Would mark transaction {transaction_id} as synced (sync_reference: {sync_reference})")
+            return True
+
+        # PRODUCTION: attempt to call Ramp API to mark sync status
+        url = f"{self.base_url}/transactions/{transaction_id}/sync"
+        data = {"synced": True, "sync_system": "business_central"}
+        if sync_reference:
+            data["sync_reference"] = sync_reference
+
+        try:
+            resp = self.session.post(url, json=data)
+            # Consider 200/201/204 as success
+            return resp.status_code >= 200 and resp.status_code < 300
+        except Exception:
+            return False
+
+    def is_transaction_synced(self, transaction: Dict) -> bool:
+        """Heuristic check whether a transaction object is already marked as synced.
+
+        This checks common fields in Ramp responses such as: 'synced', 'sync_status', or metadata.
+        Returns True if any indicator suggests the transaction has been synced previously.
+        """
+        if not transaction or not isinstance(transaction, dict):
+            return False
+
+        # Common patterns
+        # 1. Top-level boolean flag
+        if transaction.get('synced') is True:
+            return True
+
+        # 2. sync_status object
+        ss = transaction.get('sync_status') or transaction.get('sync') or {}
+        if isinstance(ss, dict):
+            if ss.get('synced') is True:
+                return True
+
+        # 3. metadata field or attributes
+        meta = transaction.get('metadata') or transaction.get('attributes') or {}
+        if isinstance(meta, dict):
+            if meta.get('synced') is True or meta.get('is_synced') is True:
+                return True
+
+        # Default: assume not synced
+        return False
         
         # PRODUCTION CODE (uncomment when ready):
         # url = f"{self.base_url}/transactions/{transaction_id}/sync"

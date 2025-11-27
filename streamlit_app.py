@@ -410,6 +410,19 @@ for key, label in data_types.items():
     if st.sidebar.checkbox(label, value=True, key=f"checkbox_{key}"):
         selected_types.append(key)
 
+# Post-export sync options
+st.sidebar.markdown("")
+mark_transactions_after_export = st.sidebar.checkbox(
+    "Mark exported transactions in Ramp as synced",
+    value=False,
+    help="If checked, the app will mark exported transactions as synced in Ramp. This is a dry-run unless 'Enable live Ramp sync' is checked."
+)
+enable_live_ramp_sync = st.sidebar.checkbox(
+    "Enable live Ramp sync (will POST to Ramp)",
+    value=False,
+    help="Enable sending a request to Ramp to mark transactions as synced. Requires accounting:write scope and should be used cautiously."
+)
+
 def run_export(selected_types, start_date, end_date, cfg, env):
     """Run the export process and display results"""
 
@@ -419,7 +432,8 @@ def run_export(selected_types, start_date, end_date, cfg, env):
                 base_url=cfg['ramp']['base_url'],
                 token_url=cfg['ramp']['token_url'],
                 client_id=env['RAMP_CLIENT_ID'],
-                client_secret=env['RAMP_CLIENT_SECRET']
+                client_secret=env['RAMP_CLIENT_SECRET'],
+                enable_sync=enable_live_ramp_sync
             )
             client.authenticate()
             st.success("Authentication successful")
@@ -454,11 +468,13 @@ def run_export(selected_types, start_date, end_date, cfg, env):
     start_date_str = start_date.strftime('%Y-%m-%d')
     end_date_str = end_date.strftime('%Y-%m-%d')
 
+    exported_transaction_ids = set()
+
     for data_type in available_selected_types:
         status_text.text(f"Fetching {data_type} from {start_date_str} to {end_date_str}...")
 
         try:
-            data, df = fetch_data_for_type(client, data_type, start_date_str, end_date_str, cfg)
+            data, df, processed_ids = fetch_data_for_type(client, data_type, start_date_str, end_date_str, cfg)
 
             if data:
                 st.success(f"Retrieved {len(data)} {data_type} records")
@@ -469,6 +485,10 @@ def run_export(selected_types, start_date, end_date, cfg, env):
                     combined_df = df
                 else:
                     combined_df = pd.concat([combined_df, df], ignore_index=True)
+                # Collect processed transaction ids for sync marking
+                if processed_ids and data_type == 'transactions':
+                    for tid in processed_ids:
+                        exported_transaction_ids.add(str(tid))
             else:
                 st.info(f"No {data_type} data found for the specified period")
 
@@ -527,6 +547,25 @@ def run_export(selected_types, start_date, end_date, cfg, env):
             use_container_width=True
         )
 
+    # If requested, mark exported transactions in Ramp (dry-run unless live sync enabled)
+    if mark_transactions_after_export and exported_transaction_ids:
+        st.info(f"Preparing to mark {len(exported_transaction_ids)} exported transactions as synced in Ramp...")
+        successes = 0
+        failures = 0
+        sync_ref = f"BCExport_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        for tid in exported_transaction_ids:
+            ok = client.mark_transaction_synced(tid, sync_reference=sync_ref)
+            if ok:
+                successes += 1
+            else:
+                failures += 1
+
+        if enable_live_ramp_sync:
+            st.success(f"Ramp sync complete: {successes} succeeded, {failures} failed.")
+        else:
+            st.info(f"Dry run complete: {successes} would be marked synced (no live requests were sent).")
+
 def check_available_endpoints(client, cfg):
     """Check which API endpoints are available based on OAuth scopes."""
     endpoints_to_check = {
@@ -557,7 +596,11 @@ def check_available_endpoints(client, cfg):
     return available
 
 def fetch_data_for_type(client, data_type, start_date, end_date, cfg):
-    """Fetch data for a specific type and return (data, dataframe)"""
+    """Fetch data for a specific type and return (data, dataframe, processed_ids)
+
+    processed_ids is a list of string ids for the items that were successfully
+    transformed into DataFrame rows (parsed from the "Document No." column when present).
+    """
     if data_type == 'transactions':
         data = client.get_transactions(
             status=cfg['ramp'].get('status_filter'),
@@ -565,6 +608,14 @@ def fetch_data_for_type(client, data_type, start_date, end_date, cfg):
             end_date=end_date,
             page_size=cfg['ramp'].get('page_size', 200)
         )
+        # Filter out already-synced items when possible
+        if isinstance(data, list) and data:
+            before = len(data)
+            data = [d for d in data if not client.is_transaction_synced(d)]
+            after = len(data)
+            if after < before:
+                st.info(f"Skipped {before-after} transactions that were already marked synced in Ramp")
+
         df = ramp_to_bc_rows(data, cfg)
     elif data_type == 'bills':
         data = client.get_bills(
@@ -573,6 +624,12 @@ def fetch_data_for_type(client, data_type, start_date, end_date, cfg):
             end_date=end_date,
             page_size=cfg['ramp'].get('page_size', 200)
         )
+        if isinstance(data, list) and data:
+            before = len(data)
+            data = [d for d in data if not client.is_transaction_synced(d)]
+            after = len(data)
+            if after < before:
+                st.info(f"Skipped {before-after} bills that were already marked synced in Ramp")
         df = ramp_bills_to_bc_rows(data, cfg)
     elif data_type == 'reimbursements':
         data = client.get_reimbursements(
@@ -581,6 +638,12 @@ def fetch_data_for_type(client, data_type, start_date, end_date, cfg):
             end_date=end_date,
             page_size=cfg['ramp'].get('page_size', 200)
         )
+        if isinstance(data, list) and data:
+            before = len(data)
+            data = [d for d in data if not client.is_transaction_synced(d)]
+            after = len(data)
+            if after < before:
+                st.info(f"Skipped {before-after} reimbursements that were already marked synced in Ramp")
         df = ramp_reimbursements_to_bc_rows(data, cfg)
     elif data_type == 'cashbacks':
         data = client.get_cashbacks(
@@ -588,6 +651,12 @@ def fetch_data_for_type(client, data_type, start_date, end_date, cfg):
             end_date=end_date,
             page_size=cfg['ramp'].get('page_size', 200)
         )
+        if isinstance(data, list) and data:
+            before = len(data)
+            data = [d for d in data if not client.is_transaction_synced(d)]
+            after = len(data)
+            if after < before:
+                st.info(f"Skipped {before-after} cashbacks that were already marked synced in Ramp")
         df = ramp_cashbacks_to_bc_rows(data, cfg)
     elif data_type == 'statements':
         data = client.get_statements(
@@ -595,11 +664,33 @@ def fetch_data_for_type(client, data_type, start_date, end_date, cfg):
             end_date=end_date,
             page_size=cfg['ramp'].get('page_size', 200)
         )
+        if isinstance(data, list) and data:
+            before = len(data)
+            data = [d for d in data if not client.is_transaction_synced(d)]
+            after = len(data)
+            if after < before:
+                st.info(f"Skipped {before-after} statements that were already marked synced in Ramp")
         df = ramp_statements_to_bc_rows(data, cfg)
     else:
         raise ValueError(f"Unknown data type: {data_type}")
 
-    return data, df
+    # Derive processed ids from DataFrame if possible
+    processed_ids = []
+    try:
+        if df is not None and not df.empty and 'Document No.' in df.columns:
+            for val in df['Document No.'].tolist():
+                if not val:
+                    continue
+                # Often Document No. values are formatted like PREFIX-<id>
+                if isinstance(val, str) and '-' in val:
+                    _id = val.split('-', 1)[1]
+                else:
+                    _id = str(val)
+                processed_ids.append(_id)
+    except Exception:
+        processed_ids = []
+
+    return data, df, processed_ids
 
 # Export button
 st.sidebar.markdown("")
