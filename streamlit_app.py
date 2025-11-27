@@ -91,64 +91,6 @@ else:
         else:
             code = str(code_list) if code_list else ""
 
-        # Client-side debug: log location & query in browser console for easier troubleshooting
-        components.html(
-            f"""
-            <script>
-            try {{
-                console.group('Streamlit OAuth Debug');
-                console.log('location.href ->', window.location.href);
-                console.log('location.pathname ->', window.location.pathname);
-                console.log('location.search ->', window.location.search);
-                console.log('document.referrer ->', document.referrer);
-                console.log('userAgent ->', navigator.userAgent);
-                console.groupEnd();
-            }} catch(e) {{ console.warn('client debug failed', e); }}
-            </script>
-            """,
-            height=0,
-        )
-
-        # Server-side debug: avoid printing secrets. Hash the authorization code so we can
-        # compare requests without exposing the code itself.
-        try:
-            import hashlib, json, time
-            code_hash = hashlib.sha256(code.encode('utf-8')).hexdigest()
-            masked_code = f"{code[:6]}...{code[-6:]}" if len(code) > 12 else code
-            code_len = len(code)
-            first8 = code[:8]
-            last8 = code[-8:]
-            debug_entry = {
-                'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-                'client_id': CLIENT_ID,
-                'tenant_id': TENANT_ID,
-                'redirect_uri': REDIRECT_URI,
-                'scopes': SCOPES_SANITIZED,
-                'query_params': {k: (v if k != 'code' else '[REDACTED]') for k, v in qp.items()},
-                'code_hash': code_hash,
-                'masked_code': masked_code,
-                'code_len': code_len,
-                'first8': first8,
-                'last8': last8,
-                'state_param': qp.get('state'),
-                'session_state_param': qp.get('session_state'),
-                'local_session_state': st.session_state.get(SESSION_STATE_KEY),
-            }
-            # Append a debug line to a local log file for post-mortem (no secrets written)
-            try:
-                with open('auth_debug.log', 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(debug_entry) + "\n")
-            except Exception:
-                # best-effort logging; ignore failures to avoid breaking auth flow
-                pass
-
-            # Present high-level debug info in the UI (no secrets)
-            st.info('Debug: captured OAuth response parameters (sensitive values masked).')
-            st.write({'code_hash': code_hash, 'masked_code': masked_code, 'code_len': code_len, 'first8': first8, 'last8': last8, 'scopes': SCOPES_SANITIZED, 'redirect_uri': REDIRECT_URI, 'state_param': qp.get('state'), 'local_session_state': st.session_state.get(SESSION_STATE_KEY)})
-        except Exception:
-            # Non-fatal: continue to token exchange and let MSAL return errors if any.
-            pass
-
         cca = msal.ConfidentialClientApplication(
             CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET
         )
@@ -177,13 +119,6 @@ else:
             }
             st.error("Authentication failed during token exchange.")
             st.write(err)
-
-            # Add an extra debug message with the redirect_uri & scopes used in-flight
-            try:
-                st.write({'debug_redirect_uri': REDIRECT_URI, 'debug_scopes': SCOPES_SANITIZED})
-            except Exception:
-                pass
-
             st.stop()
     else:
         state = str(uuid4())
