@@ -4,11 +4,78 @@ from datetime import datetime, timedelta
 from io import BytesIO
 import sys
 import os
-if not st.user:
-    st.info("🔒 Please log in with your Organization's Microsoft account to access the exporter.")
+# MSAL-based in-app authentication for Streamlit Community Cloud (Azure AD)
+import msal
+from uuid import uuid4
+from urllib.parse import urlencode
+
+# Azure AD settings must be added to Streamlit secrets: AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+# AZURE_TENANT_ID, AZURE_REDIRECT_URI. Optionally AUTH_SCOPES (comma-separated).
+CLIENT_ID = st.secrets.get("AZURE_CLIENT_ID")
+CLIENT_SECRET = st.secrets.get("AZURE_CLIENT_SECRET")
+TENANT_ID = st.secrets.get("AZURE_TENANT_ID")
+REDIRECT_URI = st.secrets.get("AZURE_REDIRECT_URI")
+SCOPES = [s.strip() for s in st.secrets.get("AUTH_SCOPES", "openid,profile,email").split(",")]
+
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+SESSION_TOKEN_KEY = "msal_token"
+SESSION_STATE_KEY = "msal_state"
+
+def build_auth_url(state: str) -> str:
+    cca = msal.ConfidentialClientApplication(
+        CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET
+    )
+    return cca.get_authorization_request_url(scopes=SCOPES, state=state, redirect_uri=REDIRECT_URI)
+
+# Ensure the secrets are configured
+if not CLIENT_ID or not TENANT_ID or not REDIRECT_URI:
+    st.error("Authentication is not configured. Add AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_REDIRECT_URI to app secrets.")
     st.stop()
 
-st.sidebar.success(f"Welcome, {st.user.get('name', st.user.get('email', 'User'))}!")
+# If token present in session, use it
+token = st.session_state.get(SESSION_TOKEN_KEY)
+if token and token.get("access_token"):
+    pass
+else:
+    qp = st.experimental_get_query_params()
+    if "code" in qp:
+        code = qp["code"][0]
+        cca = msal.ConfidentialClientApplication(
+            CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET
+        )
+        result = cca.acquire_token_by_authorization_code(
+            code, scopes=SCOPES, redirect_uri=REDIRECT_URI
+        )
+        if result and result.get("access_token"):
+            st.session_state[SESSION_TOKEN_KEY] = result
+            # clear query params from URL
+            st.experimental_set_query_params()
+            token = result
+        else:
+            st.error("Authentication failed. Please try signing in again.")
+            st.stop()
+    else:
+        state = str(uuid4())
+        st.session_state[SESSION_STATE_KEY] = state
+        auth_url = build_auth_url(state)
+        st.markdown("🔒 Please sign in with your Microsoft account to continue.")
+        st.markdown(f"[Sign in with Microsoft]({auth_url})")
+        st.stop()
+
+# Show a friendly welcome using identity claims (if available)
+id_claims = st.session_state.get(SESSION_TOKEN_KEY, {}).get("id_token_claims", {})
+user_name = id_claims.get("name") or id_claims.get("preferred_username") or id_claims.get("email", "User")
+st.sidebar.success(f"Welcome, {user_name}!")
+
+# Logout action clears the session token and optionally provides Azure logout link
+if st.sidebar.button("Log out"):
+    st.session_state.pop(SESSION_TOKEN_KEY, None)
+    st.experimental_set_query_params()
+    logout_url = (
+        f"https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri={REDIRECT_URI}"
+    )
+    st.info("You have been logged out.")
+    st.markdown(f"[Sign in again]({logout_url})")
 
 # Add current directory to path so we can import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
