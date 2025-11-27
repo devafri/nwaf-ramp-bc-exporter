@@ -84,7 +84,12 @@ else:
     # Use the stable `st.query_params` API
     qp = st.query_params
     if "code" in qp:
-        code = qp["code"][0]
+        # CRITICAL FIX: st.query_params returns a list-like object; access the full string correctly
+        code_list = qp.get("code")
+        if isinstance(code_list, list):
+            code = code_list[0] if code_list else ""
+        else:
+            code = str(code_list) if code_list else ""
 
         # Client-side debug: log location & query in browser console for easier troubleshooting
         components.html(
@@ -161,7 +166,7 @@ else:
         if result and result.get("access_token"):
             st.session_state[SESSION_TOKEN_KEY] = result
             # clear query params from URL
-            st.experimental_set_query_params()
+            st.query_params.clear()
             token = result
         else:
             # Surface non-sensitive MSAL error fields for debugging (no secrets).
@@ -185,11 +190,9 @@ else:
         st.session_state[SESSION_STATE_KEY] = state
         auth_url = build_auth_url(state)
         st.markdown("🔒 Please sign in with your Microsoft account to continue.")
-        # Use an HTML anchor that opens in the same tab so the Streamlit session stays consistent.
-        # Open the auth URL at the top-level browsing context to avoid any iframe/frame restrictions
-        components.html(f"<a href=\"{auth_url}\" target=\"_top\" rel=\"noopener noreferrer\">Sign in with Microsoft</a>", height=30)
-        st.write("Tip: if a new tab opens, try opening the sign-in link in the same tab to preserve session state.")
-        st.stop()
+        st.markdown("**Important:** Copy the URL below and paste it into this same browser tab's address bar, then press Enter to sign in.")
+        st.code(auth_url, language=None)
+        st.info("💡 Why? Opening in the same tab preserves your session and ensures the authorization code arrives correctly.")
         st.stop()
 
 # Show a friendly welcome using identity claims (if available)
