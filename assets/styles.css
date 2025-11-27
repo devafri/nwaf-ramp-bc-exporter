@@ -32,15 +32,18 @@
 }
 
 .app-header h1 {
-    font-size: 1.75rem;
-    font-weight: 600;
+    font-size: 1.95rem;
+    font-weight: 700;
     margin: 0;
-    letter-spacing: -0.025em;
+    letter-spacing: -0.02em;
+    color: #ffffff; /* enforce high contrast */
+    opacity: 1 !important; /* ensure visible against background */
+    text-shadow: 0 2px 6px rgba(0,0,0,0.5); /* subtle lift for legibility */
 }
 
 .app-header p {
     margin: 0.5rem 0 0 0;
-    color: #cbd5e0;
+    color: #e6eef8; /* lighter subtitle for contrast */
     font-size: 0.95rem;
     font-weight: 400;
 }
