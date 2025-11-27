@@ -4,6 +4,30 @@ from datetime import datetime, timedelta
 from io import BytesIO
 import sys
 import os
+import streamlit.components.v1 as components
+
+# Client-side fix: if Azure redirected to a subpath (e.g. /oauth2callback),
+# redirect the browser to the app root while preserving query params so
+# Streamlit's static assets and WebSocket endpoints load from the correct root.
+components.html(
+        """
+        <script>
+        (function() {
+            try {
+                const p = window.location.pathname || '/';
+                if (p && p !== '/' && p.includes('oauth2callback')) {
+                    const q = window.location.search || '';
+                    // Replace so back button doesn't loop
+                    window.location.replace('/' + q);
+                }
+            } catch (e) {
+                // ignore
+            }
+        })();
+        </script>
+        """,
+        height=0,
+)
 # MSAL-based in-app authentication for Streamlit Community Cloud (Azure AD)
 import msal
 from uuid import uuid4
