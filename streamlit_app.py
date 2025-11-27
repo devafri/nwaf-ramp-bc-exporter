@@ -18,7 +18,17 @@ components.html(
                 if (p && p !== '/' && p.includes('oauth2callback')) {
                     const q = window.location.search || '';
                     // Replace so back button doesn't loop
-                    window.location.replace('/' + q);
+                    // Use top-level navigation to avoid embedding identity provider pages inside frames
+                    try {
+                        if (window.top && window.top !== window) {
+                            window.top.location.replace('/' + q);
+                        } else {
+                            window.location.replace('/' + q);
+                        }
+                    } catch (e) {
+                        // If cross-origin access to window.top is denied, fallback to setting top location via document
+                        try { document.location = '/' + q; } catch(e2) { window.location.replace('/' + q);} 
+                    }
                 }
             } catch (e) {
                 // ignore
@@ -176,7 +186,8 @@ else:
         auth_url = build_auth_url(state)
         st.markdown("🔒 Please sign in with your Microsoft account to continue.")
         # Use an HTML anchor that opens in the same tab so the Streamlit session stays consistent.
-        components.html(f"<a href=\"{auth_url}\" target=\"_self\" rel=\"noopener\">Sign in with Microsoft</a>", height=30)
+        # Open the auth URL at the top-level browsing context to avoid any iframe/frame restrictions
+        components.html(f"<a href=\"{auth_url}\" target=\"_top\" rel=\"noopener noreferrer\">Sign in with Microsoft</a>", height=30)
         st.write("Tip: if a new tab opens, try opening the sign-in link in the same tab to preserve session state.")
         st.stop()
         st.stop()
