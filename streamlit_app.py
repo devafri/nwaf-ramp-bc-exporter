@@ -6,6 +6,14 @@ import sys
 import os
 import streamlit.components.v1 as components
 
+# Page configuration must be the first Streamlit command in the script
+st.set_page_config(
+    page_title="Ramp → Business Central Export",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 # Client-side fix: if Azure redirected to a subpath (e.g. /oauth2callback),
 # redirect the browser to the app root while preserving query params so
 # Streamlit's static assets and WebSocket endpoints load from the correct root.
@@ -306,13 +314,6 @@ from transform import (ramp_to_bc_rows, ramp_bills_to_bc_rows,
                       ramp_reimbursements_to_bc_rows, ramp_cashbacks_to_bc_rows,
                       ramp_statements_to_bc_rows)
 from bc_export import export
-
-st.set_page_config(
-    page_title="Ramp → Business Central Export",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Load institutional stylesheet
 def load_css():
