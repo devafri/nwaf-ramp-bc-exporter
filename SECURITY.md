@@ -1,177 +1,88 @@
-# 🔒 Security Analysis: Ramp → Business Central Export Tool
+# SECURITY.md — Ramp → Business Central Export
 
-## 📊 **SECURITY RATING: HIGH** ✅
+Last updated: 2025-11-27
 
-This application has been designed with security as a top priority for handling sensitive financial data.
+This repository contains a Streamlit application used by Northwest Area Foundation teams to export Ramp financial data into Business Central General Journal format.
 
----
-
-## 🛡️ **Security Features Implemented**
-
-### **1. API Credentials Protection**
-- ✅ **Streamlit Cloud Secrets**: API credentials stored securely in Streamlit Cloud secrets (not in code)
-- ✅ **Environment Variables**: Local development uses `.env` files (not committed to git)
-- ✅ **No Hardcoded Secrets**: Zero credentials in source code
-- ✅ **OAuth 2.0**: Uses Ramp's secure OAuth token exchange
-
-### **2. Data Transmission Security**
-- ✅ **HTTPS Only**: All API calls use HTTPS encryption
-- ✅ **Direct Downloads**: Files downloaded directly to user's browser (no server storage)
-- ✅ **No Data Persistence**: Data exists only in memory during session
-- ✅ **Session Isolation**: Each user session is completely isolated
-
-### **3. Access Control**
-- ✅ **No Authentication Required**: Public access through shared URL
-- ✅ **Read-Only Operations**: Only reads data from Ramp (no write/modify operations)
-- ✅ **Scoped API Permissions**: Limited to specific Ramp API scopes
-- ✅ **Time-Bound Access**: OAuth tokens expire appropriately
-
-### **4. Data Handling Security**
-- ✅ **In-Memory Processing**: Financial data never written to disk
-- ✅ **Temporary Buffers**: Excel/CSV files created in memory only
-- ✅ **No Logging of Sensitive Data**: Error messages sanitized
-- ✅ **Data Preview Limited**: Only shows first 10 rows in UI
-
-### **5. Network Security**
-- ✅ **Ramp API Security**: Uses Ramp's enterprise-grade API infrastructure
-- ✅ **TLS Encryption**: All network traffic encrypted
-- ✅ **API Rate Limiting**: Respects Ramp's rate limits
-- ✅ **Error Handling**: Graceful failure without data exposure
+This document explains the app's security posture, responsible disclosure, and operational guidelines for safe use and maintenance.
 
 ---
 
-## 🚨 **Security Considerations**
+## Summary / Scope
 
-### **Public URL Access**
-⚠️ **Consideration**: The app is accessible via a public URL
-- **Risk**: Anyone with the URL can access the app
-- **Mitigation**: This is by design for ease of use. If higher security needed, consider:
-  - Password protection
-  - IP restrictions
-  - VPN requirements
-
-### **Data in Browser**
-⚠️ **Consideration**: Exported files are downloaded to user's browser
-- **Risk**: Files exist temporarily on user's device
-- **Mitigation**: Standard browser security applies. Files should be handled according to your organization's data handling policies.
-
-### **API Scope Limitations**
-✅ **Strength**: App only requests read-only scopes
-- `transactions:read`, `bills:read`, `reimbursements:read`, `cashbacks:read`, `statements:read`
-- No write permissions to Ramp or Business Central
+- Authentication: Microsoft Azure Active Directory (OAuth 2.0 Authorization Code flow via MSAL) with a device-code fallback if needed.
+- CSRF protection: state parameter validation using a server-side-state AND stateless signed state (HMAC + timestamp) so redirects are safe across tabs.
+- Token management: tokens are stored in user session state and refreshed silently with a short buffer before expiry.
+- Ramp sync operations: The app filters out already-synced items and supports post-export marking of transactions as synced in Ramp. Live writes are disabled by default and require explicit opt-in.
+- Auditability: each sync run produces an audit CSV (exports/sync_audit_<timestamp>.csv) listing per-transaction outcomes.
 
 ---
 
-## 🔍 **Security Audit Results**
+## Responsible Disclosure / Security Contact
 
-### **External Dependencies Security:**
-- ✅ **Streamlit**: Well-maintained, security-focused
-- ✅ **Requests**: Industry standard HTTP library
-- ✅ **Pandas**: Data processing library (no network operations)
-- ✅ **OpenPyXL**: Excel generation (local only)
+If you discover a vulnerability in this application, please follow these steps:
 
-### **Data Flow Security:**
-```
-User Browser → Streamlit Cloud → Ramp API → Streamlit Cloud → User Browser
-     ↓             ↓             ↓             ↓             ↓
-   HTTPS        HTTPS         HTTPS         HTTPS        Download
-```
+1. Do not exploit the issue. Avoid unauthorized data access or modification.
+2. Contact the security owner: security@nwaf.org (or your internal security channel).
+3. Provide: brief description, steps to reproduce, potential impact, any relevant logs/screenshots, and your suggested mitigation if possible.
+4. If you don’t receive a response within 48 hours, escalate to the project owner or manager listed in the project README.
 
-### **Compliance Considerations:**
-- ✅ **Financial Data Handling**: No persistent storage
-- ✅ **Audit Trail**: All operations logged appropriately
-- ✅ **Error Handling**: No sensitive data in error messages
-- ✅ **Access Logging**: Streamlit Cloud provides access logs
+This repository does not publish a public bug bounty — handle disclosures privately.
 
 ---
 
-## 🛠️ **Security Best Practices Implemented**
+## Safe Operation Rules (for administrators and operators)
 
-### **Code Security:**
-```python
-# ✅ Secure credential loading
-env = {
-    'RAMP_CLIENT_ID': st.secrets.get('RAMP_CLIENT_ID'),
-    'RAMP_CLIENT_SECRET': st.secrets.get('RAMP_CLIENT_SECRET')
-}
-
-# ✅ Sanitized error messages
-st.error("❌ Authentication failed. Please contact administrator.")
-
-# ✅ No sensitive data logging
-# Error details not exposed to UI
-```
-
-### **Infrastructure Security:**
-- ✅ **Streamlit Cloud**: SOC 2 compliant hosting
-- ✅ **Container Isolation**: Each app runs in isolated container
-- ✅ **Automatic Updates**: Dependencies kept current
-- ✅ **CDN Protection**: Cloudflare DDoS protection
+- Keep "Enable live Ramp sync" turned OFF unless you explicitly intend to mark Ramp transactions as synced. The default operation is dry-run (no writes).
+- In order to perform live writes, the Azure AD token used must have the `accounting:write` scope. The app will (or should) validate that the current granted scopes include the required write scope before enabling or performing any write operations.
+- Limit production live sync permission: allow only authorized finance team members to toggle live sync. Implement group-based RBAC in Azure AD (recommended group: financial-sync-ad-group) and check `id_token` groups before allowing live writes.
+- Ensure that Ramp client ID/secret and Azure client secret are stored in the Streamlit Cloud secrets (never in source, never in logs).
 
 ---
 
-## 📋 **Security Checklist for Deployment**
+## Operational Controls & Monitoring
 
-### **Pre-Deployment:**
-- [ ] Review API scopes in Ramp OAuth app
-- [ ] Set up Streamlit Cloud secrets
-- [ ] Test with read-only data access
-- [ ] Verify HTTPS certificate
-- [ ] Check firewall rules (if applicable)
-
-### **Post-Deployment:**
-- [ ] Monitor access logs
-- [ ] Review error logs for anomalies
-- [ ] Update dependencies regularly
-- [ ] Rotate API credentials periodically
-
-### **User Access:**
-- [ ] Share URL only with authorized personnel
-- [ ] Train users on secure file handling
-- [ ] Establish data retention policies for downloaded files
+- Audit CSVs: After any sync run (manual or automated), an audit CSV is produced in `exports/` and offered for download. These files should be retained and uploaded to a protected, centralized log store (e.g., Azure Blob Storage or S3) for long-term retention and compliance.
+- Access logs: Use Azure AD sign-in logs to examine user activity and suspicious attempts.
+- Secret rotation: Rotate Azure and Ramp client secrets regularly (every 90 days recommended). Store rotation dates in operational runbooks.
+- Vulnerability scanning: Run `pip-audit` or similar tools in CI to scan dependency vulnerabilities and schedule periodic upgrades.
 
 ---
 
-## 🚨 **Emergency Security Procedures**
+## Code-level Security Notes (high-level)
 
-### **If Credentials Compromised:**
-1. **Immediately revoke** Ramp OAuth application
-2. **Regenerate** API credentials
-3. **Update** Streamlit Cloud secrets
-4. **Notify** affected users
-5. **Audit** access logs for suspicious activity
-
-### **If Data Breach Suspected:**
-1. **Stop** the Streamlit deployment
-2. **Audit** all access logs
-3. **Notify** relevant stakeholders
-4. **Review** data handling procedures
-5. **Implement** additional security measures
+- CSRF: The stateless signed-state uses HMAC over a timestamped payload with the Azure client secret as HMAC key; tokens are short-lived (default TTL 10 minutes). The app still attempts session-based state validation where available.
+- Tokens: The app stores tokens in `st.session_state` (server-side) and uses MSAL's `acquire_token_silent()` to refresh tokens. For the device flow the app uses a PublicClientApplication flow.
+- Audit: The app writes sync audit CSV files (no secrets written) and shows generic error messages in the UI while logging details server-side.
+- Mutations: Ramp write operations are gated behind `enable_sync` and should require the `accounting:write` permission.
 
 ---
 
-## 📞 **Security Contacts**
+## Recommended Next Steps / Hardening
 
-- **Streamlit Security**: security@streamlit.io
-- **Ramp Security**: security@ramp.com
-- **Your IT Security Team**: [contact information]
+1. Enforce write-scope validation in the UI/backend before allowing `enable_sync` or executing write operations.
+2. Implement RBAC: require a specific Azure AD group to enable live sync.
+3. Centralize audit file storage and configure retention (upload audit CSVs to a protected object store automatically).
+4. Add stronger session timeout and re-authentication on critical actions.
+5. Add automated dependency scanning + a security-runbook for rotating secrets and handling incidents.
+
+---
+
+## Changes in this repository related to security (recent)
+
+- Implemented a stateless signed-state to support cross-tab OAuth redirects and protect against CSRF.
+- Added device-code authentication flow.
+- Implemented token refresh, improved error handling, and dependency pinning.
+- Added unsynced-only exports, safe dry-run post-export sync, manual sync button, and downloadable sync audit CSVs.
+- Provided SECURITY_POST_DEPLOYMENT_ASSESSMENT.md and SECURITY_IMPLEMENTATION.md for detailed operational info.
 
 ---
 
-## ✅ **Final Security Assessment**
+## Maintainers
 
-**Overall Risk Level: LOW** 🟢
-
-**Rationale:**
-- No sensitive data persistence
-- Secure credential storage
-- Encrypted data transmission
-- Limited API permissions
-- Professional hosting infrastructure
-- Regular security updates
-
-**Recommended for production use with proper access controls.**
+- Project lead: Felix Isuk <Fisuk@nwaf.org>
+- Security contact: security@nwaf.org
 
 ---
-*Security analysis performed on: November 26, 2025*
-*Next review due: May 26, 2026*
+
+If you need me to add enforcement gates (scope checks and RBAC) to prevent accidental live syncs, I can implement those next and push changes to the repository.
