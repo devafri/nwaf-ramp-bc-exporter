@@ -54,8 +54,9 @@ else:
         cca = msal.ConfidentialClientApplication(
             CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET
         )
+        # Use sanitized scopes for the token exchange as well (remove reserved OIDC scopes)
         result = cca.acquire_token_by_authorization_code(
-            code, scopes=SCOPES, redirect_uri=REDIRECT_URI
+            code, scopes=SCOPES_SANITIZED, redirect_uri=REDIRECT_URI
         )
         if result and result.get("access_token"):
             st.session_state[SESSION_TOKEN_KEY] = result
