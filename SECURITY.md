@@ -23,9 +23,8 @@ This document explains the app's security posture, responsible disclosure, and o
 If you discover a vulnerability in this application, please follow these steps:
 
 1. Do not exploit the issue. Avoid unauthorized data access or modification.
-2. Contact the security owner: security@nwaf.org (or your internal security channel).
-3. Provide: brief description, steps to reproduce, potential impact, any relevant logs/screenshots, and your suggested mitigation if possible.
-4. If you don’t receive a response within 48 hours, escalate to the project owner or manager listed in the project README.
+2. Provide: brief description, steps to reproduce, potential impact, any relevant logs/screenshots, and your suggested mitigation if possible.
+3. If you don’t receive a response within 48 hours, escalate to the project owner or manager listed in the project README.
 
 This repository does not publish a public bug bounty — handle disclosures privately.
 
@@ -75,14 +74,3 @@ This repository does not publish a public bug bounty — handle disclosures priv
 - Implemented token refresh, improved error handling, and dependency pinning.
 - Added unsynced-only exports, safe dry-run post-export sync, manual sync button, and downloadable sync audit CSVs.
 - Provided SECURITY_POST_DEPLOYMENT_ASSESSMENT.md and SECURITY_IMPLEMENTATION.md for detailed operational info.
-
----
-
-## Maintainers
-
-- Project lead: Felix Isuk <Fisuk@nwaf.org>
-- Security contact: security@nwaf.org
-
----
-
-If you need me to add enforcement gates (scope checks and RBAC) to prevent accidental live syncs, I can implement those next and push changes to the repository.
