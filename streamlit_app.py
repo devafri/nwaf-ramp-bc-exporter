@@ -75,13 +75,69 @@ else:
     qp = st.query_params
     if "code" in qp:
         code = qp["code"][0]
+
+        # Client-side debug: log location & query in browser console for easier troubleshooting
+        components.html(
+            f"""
+            <script>
+            try {{
+                console.group('Streamlit OAuth Debug');
+                console.log('location.href ->', window.location.href);
+                console.log('location.pathname ->', window.location.pathname);
+                console.log('location.search ->', window.location.search);
+                console.log('document.referrer ->', document.referrer);
+                console.log('userAgent ->', navigator.userAgent);
+                console.groupEnd();
+            }} catch(e) {{ console.warn('client debug failed', e); }}
+            </script>
+            """,
+            height=0,
+        )
+
+        # Server-side debug: avoid printing secrets. Hash the authorization code so we can
+        # compare requests without exposing the code itself.
+        try:
+            import hashlib, json, time
+            code_hash = hashlib.sha256(code.encode('utf-8')).hexdigest()
+            masked_code = f"{code[:6]}...{code[-6:]}" if len(code) > 12 else code
+            debug_entry = {
+                'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                'client_id': CLIENT_ID,
+                'tenant_id': TENANT_ID,
+                'redirect_uri': REDIRECT_URI,
+                'scopes': SCOPES_SANITIZED,
+                'query_params': {k: (v if k != 'code' else '[REDACTED]') for k, v in qp.items()},
+                'code_hash': code_hash,
+                'masked_code': masked_code,
+            }
+            # Append a debug line to a local log file for post-mortem (no secrets written)
+            try:
+                with open('auth_debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(debug_entry) + "\n")
+            except Exception:
+                # best-effort logging; ignore failures to avoid breaking auth flow
+                pass
+
+            # Present high-level debug info in the UI (no secrets)
+            st.info('Debug: captured OAuth response parameters (sensitive values masked).')
+            st.write({'code_hash': code_hash, 'masked_code': masked_code, 'scopes': SCOPES_SANITIZED, 'redirect_uri': REDIRECT_URI})
+        except Exception:
+            # Non-fatal: continue to token exchange and let MSAL return errors if any.
+            pass
+
         cca = msal.ConfidentialClientApplication(
             CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET
         )
         # Use sanitized scopes for the token exchange as well (remove reserved OIDC scopes)
-        result = cca.acquire_token_by_authorization_code(
-            code, scopes=SCOPES_SANITIZED, redirect_uri=REDIRECT_URI
-        )
+        try:
+            result = cca.acquire_token_by_authorization_code(
+                code, scopes=SCOPES_SANITIZED, redirect_uri=REDIRECT_URI
+            )
+        except Exception as ex:
+            st.error('Token exchange raised an exception.')
+            st.write({'exception': str(ex)})
+            st.stop()
+
         # Debug & error handling: MSAL returns an error dict when token exchange fails.
         if result and result.get("access_token"):
             st.session_state[SESSION_TOKEN_KEY] = result
@@ -97,6 +153,13 @@ else:
             }
             st.error("Authentication failed during token exchange.")
             st.write(err)
+
+            # Add an extra debug message with the redirect_uri & scopes used in-flight
+            try:
+                st.write({'debug_redirect_uri': REDIRECT_URI, 'debug_scopes': SCOPES_SANITIZED})
+            except Exception:
+                pass
+
             st.stop()
     else:
         state = str(uuid4())
