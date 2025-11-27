@@ -40,6 +40,10 @@ components.html(
 )
 # MSAL-based in-app authentication for Streamlit Community Cloud (Azure AD)
 import msal
+import base64
+import hmac
+import hashlib
+import time
 from uuid import uuid4
 from urllib.parse import urlencode
 
@@ -71,6 +75,45 @@ def build_auth_url(state: str) -> str:
         CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET
     )
     return cca.get_authorization_request_url(scopes=SCOPES_SANITIZED, state=state, redirect_uri=REDIRECT_URI)
+
+
+# Stateless signed state helpers
+def _make_signed_state(raw_state: str, ttl: int = 600) -> str:
+    """Create a URL-safe signed state token combining raw_state and timestamp.
+
+    Format: base64url(payload) . hex(hmac)
+    payload = "{raw_state}:{ts}" (ts = int seconds)
+    ttl unused here; verification enforces TTL.
+    """
+    ts = str(int(time.time()))
+    payload = f"{raw_state}:{ts}".encode("utf-8")
+    b64 = base64.urlsafe_b64encode(payload).decode("utf-8").rstrip("=")
+    sig = hmac.new(CLIENT_SECRET.encode("utf-8"), b64.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{b64}.{sig}"
+
+
+def _verify_signed_state(signed_state: str, max_age: int = 600):
+    """Verify the signed_state token. Returns (valid: bool, raw_state_or_none).
+
+    Rejects if signature mismatch or timestamp older than max_age seconds.
+    """
+    try:
+        if not signed_state or "." not in signed_state:
+            return False, None
+        b64, sig = signed_state.split('.', 1)
+        expected_sig = hmac.new(CLIENT_SECRET.encode("utf-8"), b64.encode("utf-8"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_sig, sig):
+            return False, None
+
+        # base64 decode (add padding)
+        pad = '=' * (-len(b64) % 4)
+        payload = base64.urlsafe_b64decode(b64 + pad).decode("utf-8")
+        raw_state, ts = payload.rsplit(':', 1)
+        if int(time.time()) - int(ts) > max_age:
+            return False, None
+        return True, raw_state
+    except Exception:
+        return False, None
 
 def get_valid_token():
     """Get a valid access token, refreshing if necessary"""
@@ -129,8 +172,20 @@ else:
         if isinstance(received_state, list):
             received_state = received_state[0] if received_state else None
         expected_state = st.session_state.get(SESSION_STATE_KEY)
-        
-        if not received_state or received_state != expected_state:
+
+        valid_state = False
+        # If we received a signed state (our stateless HMAC format), verify it
+        if received_state and "." in str(received_state):
+            ok, raw = _verify_signed_state(str(received_state))
+            if ok:
+                valid_state = True
+                # store raw state in session for later correlation if needed
+                st.session_state[SESSION_STATE_KEY] = raw
+        # Fallback: if local session has expected state, compare directly
+        elif received_state and expected_state and str(received_state) == str(expected_state):
+            valid_state = True
+
+        if not received_state or not valid_state:
             st.error("Security Error: Invalid state parameter detected.")
             st.warning("This could indicate a Cross-Site Request Forgery (CSRF) attempt.")
             st.info("Please try signing in again. If this persists, contact your system administrator.")
@@ -171,9 +226,12 @@ else:
             st.write(err)
             st.stop()
     else:
-        state = str(uuid4())
-        st.session_state[SESSION_STATE_KEY] = state
-        auth_url = build_auth_url(state)
+        raw_state = str(uuid4())
+        # create signed state so callback can be validated without session persistence
+        signed_state = _make_signed_state(raw_state)
+        # still store raw_state in session when possible (optional), to assist with extra checks
+        st.session_state[SESSION_STATE_KEY] = raw_state
+        auth_url = build_auth_url(signed_state)
         
         # Institutional authentication page
         st.markdown("""
@@ -184,7 +242,10 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
-        st.info("**Instructions:** Copy the authentication URL below and paste it into this browser tab's address bar to proceed.")
+        st.markdown("**Sign in options:**")
+        # Clickable sign-in link opens in a new tab (stateless signed-state supports cross-tab flows)
+        st.markdown(f"[Sign in with Microsoft]({auth_url})")
+        st.write("If your browser prevents automatic navigation, copy the URL below and paste it into a new tab or the current tab's address bar.")
         st.code(auth_url, language=None)
         
         with st.expander("ℹ️ Security Information"):
