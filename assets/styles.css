@@ -1,0 +1,276 @@
+/* Institutional Finance Application Styles */
+/* Conservative, professional design for enterprise financial operations */
+
+:root {
+    --primary-dark: #1a1f36;
+    --primary-blue: #2c3e50;
+    --accent-blue: #3498db;
+    --text-primary: #2d3748;
+    --text-secondary: #718096;
+    --border-color: #e2e8f0;
+    --bg-light: #f7fafc;
+    --bg-white: #ffffff;
+    --success-green: #2f855a;
+    --warning-amber: #d97706;
+    --error-red: #c53030;
+}
+
+/* Remove default Streamlit padding */
+.main .block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    max-width: 1400px;
+}
+
+/* Header - Conservative institutional style */
+.app-header {
+    background-color: var(--primary-dark);
+    color: white;
+    padding: 1.5rem 2rem;
+    margin: -2rem -2rem 2rem -2rem;
+    border-bottom: 3px solid var(--accent-blue);
+}
+
+.app-header h1 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.025em;
+}
+
+.app-header p {
+    margin: 0.5rem 0 0 0;
+    color: #cbd5e0;
+    font-size: 0.95rem;
+    font-weight: 400;
+}
+
+/* Sidebar - Professional styling */
+[data-testid="stSidebar"] {
+    background-color: var(--bg-light);
+    border-right: 1px solid var(--border-color);
+}
+
+[data-testid="stSidebar"] > div:first-child {
+    background-color: var(--bg-light);
+}
+
+/* User profile section */
+.user-profile {
+    background-color: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.user-profile h4 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.75rem;
+}
+
+.user-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.user-email {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* Section headers */
+.section-header {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Info cards - Institutional style */
+.info-card {
+    background-color: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--accent-blue);
+    border-radius: 4px;
+    padding: 1.5rem;
+    margin: 1.5rem 0;
+}
+
+.info-card h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 1rem 0;
+}
+
+.info-card ul {
+    margin: 0.75rem 0;
+    padding-left: 1.5rem;
+}
+
+.info-card li {
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+    line-height: 1.5;
+}
+
+/* Authentication page - Professional */
+.auth-container {
+    max-width: 600px;
+    margin: 4rem auto;
+    background-color: var(--bg-white);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 3rem;
+    text-align: center;
+}
+
+.auth-icon {
+    font-size: 3rem;
+    color: var(--primary-blue);
+    margin-bottom: 1.5rem;
+}
+
+.auth-title {
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.75rem;
+}
+
+.auth-subtitle {
+    color: var(--text-secondary);
+    font-size: 1rem;
+    margin-bottom: 2rem;
+    line-height: 1.6;
+}
+
+/* Buttons - Conservative styling */
+.stButton > button {
+    border-radius: 4px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    border: 1px solid var(--border-color);
+}
+
+.stButton > button:hover {
+    border-color: var(--accent-blue);
+    background-color: var(--bg-light);
+}
+
+.stButton > button[kind="primary"] {
+    background-color: var(--primary-blue);
+    border-color: var(--primary-blue);
+}
+
+.stButton > button[kind="primary"]:hover {
+    background-color: var(--primary-dark);
+    border-color: var(--primary-dark);
+}
+
+/* Data tables */
+.dataframe {
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+.dataframe th {
+    background-color: var(--bg-light);
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Status messages - Institutional colors */
+.stSuccess {
+    background-color: #f0fdf4;
+    border-left: 4px solid var(--success-green);
+    color: var(--success-green);
+}
+
+.stError {
+    background-color: #fef2f2;
+    border-left: 4px solid var(--error-red);
+    color: var(--error-red);
+}
+
+.stWarning {
+    background-color: #fffbeb;
+    border-left: 4px solid var(--warning-amber);
+    color: var(--warning-amber);
+}
+
+.stInfo {
+    background-color: #eff6ff;
+    border-left: 4px solid var(--accent-blue);
+    color: var(--primary-blue);
+}
+
+/* Footer - Professional */
+.footer {
+    border-top: 1px solid var(--border-color);
+    padding: 2rem 0 1rem 0;
+    margin-top: 3rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.footer-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.footer-meta {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 0.75rem;
+}
+
+/* Download buttons */
+.download-section {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+/* Code blocks */
+.stCodeBlock {
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background-color: var(--bg-light);
+}
+
+/* Expander - Institutional */
+.streamlit-expanderHeader {
+    background-color: var(--bg-light);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+/* Progress bar */
+.stProgress > div > div {
+    background-color: var(--accent-blue);
+}
+
+/* Remove playful elements */
+* {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}

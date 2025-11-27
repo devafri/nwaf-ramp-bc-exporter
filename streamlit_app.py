@@ -64,6 +64,7 @@ if not SCOPES_SANITIZED:
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SESSION_TOKEN_KEY = "msal_token"
 SESSION_STATE_KEY = "msal_state"
+TOKEN_ACQUIRED_TIME_KEY = "token_acquired_at"
 
 def build_auth_url(state: str) -> str:
     cca = msal.ConfidentialClientApplication(
@@ -71,13 +72,45 @@ def build_auth_url(state: str) -> str:
     )
     return cca.get_authorization_request_url(scopes=SCOPES_SANITIZED, state=state, redirect_uri=REDIRECT_URI)
 
+def get_valid_token():
+    """Get a valid access token, refreshing if necessary"""
+    import time
+    
+    token = st.session_state.get(SESSION_TOKEN_KEY)
+    if not token:
+        return None
+    
+    # Check if token is expired or about to expire (5-minute buffer)
+    token_acquired_at = st.session_state.get(TOKEN_ACQUIRED_TIME_KEY, 0)
+    expires_in = token.get('expires_in', 3600)
+    expires_at = token_acquired_at + expires_in
+    
+    if time.time() >= (expires_at - 300):  # 5 minutes before expiry
+        # Token expired or about to expire - try silent refresh
+        cca = msal.ConfidentialClientApplication(
+            CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET
+        )
+        
+        accounts = cca.get_accounts()
+        if accounts:
+            result = cca.acquire_token_silent(SCOPES_SANITIZED, account=accounts[0])
+            if result and result.get("access_token"):
+                st.session_state[SESSION_TOKEN_KEY] = result
+                st.session_state[TOKEN_ACQUIRED_TIME_KEY] = time.time()
+                return result
+        
+        # Silent refresh failed - user needs to re-authenticate
+        return None
+    
+    return token
+
 # Ensure the secrets are configured
 if not CLIENT_ID or not TENANT_ID or not REDIRECT_URI:
     st.error("Authentication is not configured. Add AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_REDIRECT_URI to app secrets.")
     st.stop()
 
 # If token present in session, use it
-token = st.session_state.get(SESSION_TOKEN_KEY)
+token = get_valid_token()
 if token and token.get("access_token"):
     pass
 else:
@@ -91,6 +124,19 @@ else:
         else:
             code = str(code_list) if code_list else ""
 
+        # SECURITY: Validate state parameter to prevent CSRF attacks
+        received_state = qp.get("state")
+        if isinstance(received_state, list):
+            received_state = received_state[0] if received_state else None
+        expected_state = st.session_state.get(SESSION_STATE_KEY)
+        
+        if not received_state or received_state != expected_state:
+            st.error("Security Error: Invalid state parameter detected.")
+            st.warning("This could indicate a Cross-Site Request Forgery (CSRF) attempt.")
+            st.info("Please try signing in again. If this persists, contact your system administrator.")
+            st.session_state.clear()
+            st.stop()
+
         cca = msal.ConfidentialClientApplication(
             CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET
         )
@@ -100,13 +146,17 @@ else:
                 code, scopes=SCOPES_SANITIZED, redirect_uri=REDIRECT_URI
             )
         except Exception as ex:
-            st.error('Token exchange raised an exception.')
-            st.write({'exception': str(ex)})
+            st.error('Authentication failed. Please try again.')
+            # Log detailed error server-side but don't expose to user
+            import logging
+            logging.error(f'Token exchange exception: {str(ex)}')
             st.stop()
 
         # Debug & error handling: MSAL returns an error dict when token exchange fails.
         if result and result.get("access_token"):
+            import time
             st.session_state[SESSION_TOKEN_KEY] = result
+            st.session_state[TOKEN_ACQUIRED_TIME_KEY] = time.time()
             # clear query params from URL
             st.query_params.clear()
             token = result
@@ -125,25 +175,28 @@ else:
         st.session_state[SESSION_STATE_KEY] = state
         auth_url = build_auth_url(state)
         
-        # Styled authentication page
+        # Institutional authentication page
         st.markdown("""
         <div class="auth-container">
             <div class="auth-icon">🔒</div>
             <h1 class="auth-title">Authentication Required</h1>
-            <p class="auth-subtitle">Sign in with your Microsoft account to access the Ramp → Business Central Export tool</p>
+            <p class="auth-subtitle">Please authenticate with your Microsoft corporate account to access the financial data export platform.</p>
         </div>
         """, unsafe_allow_html=True)
         
-        st.info("📋 **How to sign in:** Copy the URL below and paste it into this browser tab's address bar, then press Enter.")
+        st.info("**Instructions:** Copy the authentication URL below and paste it into this browser tab's address bar to proceed.")
         st.code(auth_url, language=None)
         
-        with st.expander("ℹ️ Why do I need to copy the URL?"):
+        with st.expander("ℹ️ Security Information"):
             st.markdown("""
-            For security reasons, the authentication flow works best when you navigate directly to the Microsoft sign-in page 
-            from the same browser tab. This ensures:
-            - Your session is preserved
-            - The authorization code is delivered correctly
-            - Secure token exchange with Microsoft Azure AD
+            **Why is this step required?**
+            
+            For security compliance, the authentication flow requires direct navigation to the Microsoft identity provider. 
+            This ensures:
+            - Secure session management
+            - Proper authorization token delivery
+            - CSRF protection
+            - Compliance with enterprise security policies
             """)
         st.stop()
 
@@ -195,118 +248,34 @@ from bc_export import export
 
 st.set_page_config(
     page_title="Ramp → Business Central Export",
-    page_icon="💳",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for improved styling
-st.markdown("""
-<style>
-    /* Main header styling */
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    .main-header h1 {
-        color: white;
-        margin: 0;
-        font-size: 2.5rem;
-        font-weight: 700;
-    }
-    .main-header p {
-        color: rgba(255, 255, 255, 0.9);
-        margin: 0.5rem 0 0 0;
-        font-size: 1.1rem;
-    }
-    
-    /* Card styling */
-    .info-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 8px;
-        border-left: 4px solid #667eea;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        margin: 1rem 0;
-    }
-    
-    /* Button styling */
-    .stButton>button {
-        border-radius: 6px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-    }
-    
-    /* Sidebar styling */
-    [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
-    }
-    [data-testid="stSidebar"] .sidebar-content {
-        padding: 1rem;
-    }
-    
-    /* Success/Error message styling */
-    .stSuccess, .stError, .stWarning, .stInfo {
-        border-radius: 6px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    
-    /* Data preview table */
-    .dataframe {
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-    }
-    
-    /* Footer styling */
-    .footer {
-        text-align: center;
-        padding: 2rem 0;
-        color: #6c757d;
-        border-top: 1px solid #e9ecef;
-        margin-top: 3rem;
-    }
-    
-    /* Auth page styling */
-    .auth-container {
-        max-width: 600px;
-        margin: 4rem auto;
-        padding: 3rem;
-        background: white;
-        border-radius: 12px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-        text-align: center;
-    }
-    .auth-icon {
-        font-size: 4rem;
-        margin-bottom: 1rem;
-    }
-    .auth-title {
-        font-size: 2rem;
-        font-weight: 700;
-        color: #1f2937;
-        margin-bottom: 0.5rem;
-    }
-    .auth-subtitle {
-        color: #6b7280;
-        margin-bottom: 2rem;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Load institutional stylesheet
+def load_css():
+    css_file = os.path.join(os.path.dirname(__file__), 'assets', 'styles.css')
+    if os.path.exists(css_file):
+        with open(css_file) as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    else:
+        # Fallback inline minimal styles if CSS file not found
+        st.markdown("""
+        <style>
+        .app-header { background-color: #1a1f36; color: white; padding: 1.5rem 2rem; margin: -2rem -2rem 2rem -2rem; border-bottom: 3px solid #3498db; }
+        .app-header h1 { font-size: 1.75rem; font-weight: 600; margin: 0; }
+        .app-header p { margin: 0.5rem 0 0 0; color: #cbd5e0; font-size: 0.95rem; }
+        </style>
+        """, unsafe_allow_html=True)
 
-# Header with gradient background
+load_css()
+
+# Institutional header
 st.markdown("""
-<div class="main-header">
-    <h1>💳 Ramp → Business Central Export</h1>
-    <p>Streamlined financial data export for Business Central General Journal</p>
+<div class="app-header">
+    <h1>Ramp → Business Central Export</h1>
+    <p>Financial Data Integration Platform | Northwest Area Foundation</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -323,32 +292,30 @@ try:
         }
 
     cfg = load_config()
-    # Silent config load - only show errors
 except Exception as e:
-    st.error("❌ Configuration error. Please contact administrator.")
-    st.markdown("*Unable to load required configuration files. Please ensure all settings are properly configured.*")
+    st.error("Configuration Error: Unable to load required settings.")
+    st.markdown("Please contact your system administrator.")
     st.stop()
 
-# Welcome message in main area
+# Professional info card
 st.markdown("""
 <div class="info-card">
-    <h3>🚀 Getting Started</h3>
-    <p>Configure your export settings in the sidebar, then click <strong>Run Export</strong> to fetch and download your financial data.</p>
+    <h3>System Overview</h3>
+    <p>This platform provides secure, automated export of financial transaction data from Ramp to Business Central General Journal format.</p>
     <ul>
-        <li>✅ Secure Microsoft SSO authentication</li>
-        <li>✅ Direct integration with Ramp API</li>
-        <li>✅ Business Central-ready format</li>
-        <li>✅ Support for multiple data types</li>
+        <li>Secure Microsoft Azure AD authentication</li>
+        <li>Real-time API integration with Ramp financial platform</li>
+        <li>Business Central-compatible export formats (Excel, CSV)</li>
+        <li>Support for multiple transaction types and date ranges</li>
     </ul>
 </div>
 """, unsafe_allow_html=True)
 
-# Sidebar for configuration
-st.sidebar.markdown("### ⚙️ Export Settings")
-st.sidebar.markdown("")
+# Sidebar configuration
+st.sidebar.markdown('<div class="section-header">Export Configuration</div>', unsafe_allow_html=True)
 
 # Date range selection
-st.sidebar.markdown("#### 📅 Date Range")
+st.sidebar.markdown("**Date Range**")
 col1, col2 = st.sidebar.columns(2)
 
 with col1:
@@ -367,13 +334,13 @@ with col2:
 
 # Data type selection
 st.sidebar.markdown("")
-st.sidebar.markdown("#### 📊 Data Types to Export")
+st.sidebar.markdown("**Data Types**")
 data_types = {
-    'transactions': '💳 Transactions',
-    'bills': '📄 Bills',
-    'reimbursements': '💰 Reimbursements',
-    'cashbacks': '🎁 Cashbacks',
-    'statements': '📋 Statements'
+    'transactions': 'Card Transactions',
+    'bills': 'Bill Payments',
+    'reimbursements': 'Reimbursements',
+    'cashbacks': 'Cashback Credits',
+    'statements': 'Account Statements'
 }
 
 selected_types = []
@@ -384,7 +351,7 @@ for key, label in data_types.items():
 def run_export(selected_types, start_date, end_date, cfg, env):
     """Run the export process and display results"""
 
-    with st.spinner("🔑 Authenticating with Ramp API..."):
+    with st.spinner("Authenticating with Ramp API..."):
         try:
             client = RampClient(
                 base_url=cfg['ramp']['base_url'],
@@ -393,25 +360,25 @@ def run_export(selected_types, start_date, end_date, cfg, env):
                 client_secret=env['RAMP_CLIENT_SECRET']
             )
             client.authenticate()
-            st.success("✅ Successfully authenticated with Ramp")
+            st.success("Authentication successful")
         except Exception as e:
-            st.error("❌ Authentication failed. Please contact administrator.")
+            st.error("Authentication failed. Please contact administrator.")
             return
 
     # Check available endpoints
-    with st.spinner("🔍 Checking API availability..."):
+    with st.spinner("Checking API availability..."):
         available_endpoints = check_available_endpoints(client, cfg)
 
     # Filter selected types to only available ones
     available_selected_types = [t for t in selected_types if available_endpoints.get(t, False)]
 
     if not available_selected_types:
-        st.error("❌ None of the selected data types are available with your current API permissions")
+        st.error("None of the selected data types are available with your current API permissions")
         return
 
     if len(available_selected_types) < len(selected_types):
         unavailable = [t for t in selected_types if t not in available_selected_types]
-        st.warning(f"⚠️ Some data types are not available: {', '.join(unavailable)}")
+        st.warning(f"Some data types are not available: {', '.join(unavailable)}")
 
     # Progress tracking
     progress_bar = st.progress(0)
@@ -426,13 +393,13 @@ def run_export(selected_types, start_date, end_date, cfg, env):
     end_date_str = end_date.strftime('%Y-%m-%d')
 
     for data_type in available_selected_types:
-        status_text.text(f"📊 Fetching {data_type} from {start_date_str} to {end_date_str}...")
+        status_text.text(f"Fetching {data_type} from {start_date_str} to {end_date_str}...")
 
         try:
             data, df = fetch_data_for_type(client, data_type, start_date_str, end_date_str, cfg)
 
             if data:
-                st.success(f"✅ Found {len(data)} {data_type} records")
+                st.success(f"Retrieved {len(data)} {data_type} records")
                 total_records += len(data)
 
                 # Combine dataframes
@@ -441,10 +408,10 @@ def run_export(selected_types, start_date, end_date, cfg, env):
                 else:
                     combined_df = pd.concat([combined_df, df], ignore_index=True)
             else:
-                st.info(f"ℹ️ No {data_type} data found for the specified period")
+                st.info(f"No {data_type} data found for the specified period")
 
         except Exception as e:
-            st.error(f"❌ Error fetching {data_type}: {str(e)}")
+            st.error(f"Error fetching {data_type}: {str(e)}")
             continue
 
         processed_types += 1
@@ -454,18 +421,18 @@ def run_export(selected_types, start_date, end_date, cfg, env):
     status_text.empty()
 
     if combined_df is None or combined_df.empty:
-        st.error("❌ No data found for any of the specified types and periods.")
+        st.error("No data found for any of the specified types and periods.")
         return
 
     # Display summary
-    st.success(f"🎉 Successfully processed {total_records} total records across {len(available_selected_types)} data types")
+    st.success(f"Export complete: {total_records} records processed from {len(available_selected_types)} data sources")
 
     # Display data preview
-    st.subheader("📋 Data Preview")
+    st.subheader("Data Preview")
     st.dataframe(combined_df.head(10), use_container_width=True)
 
     # Export files
-    st.subheader("📁 Download Files")
+    st.subheader("Download Export Files")
 
     # Create Excel file
     excel_buffer = BytesIO()
@@ -482,7 +449,7 @@ def run_export(selected_types, start_date, end_date, cfg, env):
 
     with col1:
         st.download_button(
-            label="📊 Download Excel (.xlsx)",
+            label="Download Excel (.xlsx)",
             data=excel_buffer,
             file_name=f"Ramp_BC_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -491,7 +458,7 @@ def run_export(selected_types, start_date, end_date, cfg, env):
 
     with col2:
         st.download_button(
-            label="📄 Download CSV (.csv)",
+            label="Download CSV (.csv)",
             data=csv_buffer,
             file_name=f"Ramp_BC_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
@@ -573,19 +540,20 @@ def fetch_data_for_type(client, data_type, start_date, end_date, cfg):
     return data, df
 
 # Export button
-if st.sidebar.button("🚀 Run Export", type="primary", use_container_width=True):
+st.sidebar.markdown("")
+if st.sidebar.button("Execute Export", type="primary", use_container_width=True):
     if not selected_types:
-        st.error("❌ Please select at least one data type to export")
+        st.error("Please select at least one data type to export.")
     elif start_date >= end_date:
-        st.error("❌ Start date must be before end date")
+        st.error("Start date must be before end date.")
     else:
         run_export(selected_types, start_date, end_date, cfg, env)
 
 # Footer
 st.markdown("""
 <div class="footer">
-    <p><strong>Built with ❤️ for Northwest Area Foundation</strong></p>
-    <p style="margin-top: 0.5rem; font-size: 0.9rem;">Secure export tool for Ramp → Business Central General Journal with proper accounting treatment</p>
-    <p style="margin-top: 1rem; font-size: 0.85rem; color: #9ca3af;">🔒 Protected by Microsoft Azure AD SSO | 📊 Real-time Ramp API integration</p>
+    <div class="footer-title">Northwest Area Foundation</div>
+    <p>Financial Data Integration Platform | Ramp → Business Central Export</p>
+    <div class="footer-meta">Secure Enterprise Solution | Protected by Microsoft Azure AD</div>
 </div>
 """, unsafe_allow_html=True)
