@@ -8,7 +8,7 @@ if not st.user:
     st.info("🔒 Please log in with your Organization's Microsoft account to access the exporter.")
     st.stop()
 
-st.sidebar.success(f"Welcome, {st.user.name}!")
+st.sidebar.success(f"Welcome, {st.user.get('name', st.user.get('email', 'User'))}!")
 
 # Add current directory to path so we can import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
