@@ -124,10 +124,27 @@ else:
         state = str(uuid4())
         st.session_state[SESSION_STATE_KEY] = state
         auth_url = build_auth_url(state)
-        st.markdown("🔒 Please sign in with your Microsoft account to continue.")
-        st.markdown("**Important:** Copy the URL below and paste it into this same browser tab's address bar, then press Enter to sign in.")
+        
+        # Styled authentication page
+        st.markdown("""
+        <div class="auth-container">
+            <div class="auth-icon">🔒</div>
+            <h1 class="auth-title">Authentication Required</h1>
+            <p class="auth-subtitle">Sign in with your Microsoft account to access the Ramp → Business Central Export tool</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.info("📋 **How to sign in:** Copy the URL below and paste it into this browser tab's address bar, then press Enter.")
         st.code(auth_url, language=None)
-        st.info("💡 Why? Opening in the same tab preserves your session and ensures the authorization code arrives correctly.")
+        
+        with st.expander("ℹ️ Why do I need to copy the URL?"):
+            st.markdown("""
+            For security reasons, the authentication flow works best when you navigate directly to the Microsoft sign-in page 
+            from the same browser tab. This ensures:
+            - Your session is preserved
+            - The authorization code is delivered correctly
+            - Secure token exchange with Microsoft Azure AD
+            """)
         st.stop()
 
 # Show a friendly welcome using identity claims (if available)
@@ -145,17 +162,26 @@ if not id_claims:
             id_claims = {}
 
 user_name = id_claims.get("name") or id_claims.get("preferred_username") or id_claims.get("email", "User")
-st.sidebar.success(f"Welcome, {user_name}!")
+user_email = id_claims.get("email") or id_claims.get("preferred_username", "")
+
+# Enhanced sidebar user profile
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 👤 User Profile")
+st.sidebar.success(f"**{user_name}**")
+if user_email and user_email != user_name:
+    st.sidebar.caption(f"📧 {user_email}")
+st.sidebar.markdown("---")
 
 # Logout action clears the session token and optionally provides Azure logout link
-if st.sidebar.button("Log out"):
+if st.sidebar.button("🚪 Log out", use_container_width=True):
     st.session_state.pop(SESSION_TOKEN_KEY, None)
-    st.experimental_set_query_params()
+    st.query_params.clear()
     logout_url = (
         f"https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri={REDIRECT_URI}"
     )
-    st.info("You have been logged out.")
-    st.markdown(f"[Sign in again]({logout_url})")
+    st.success("✅ You have been logged out successfully.")
+    st.markdown(f"[🔐 Sign in again]({logout_url})")
+    st.stop()
 
 # Add current directory to path so we can import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -170,11 +196,119 @@ from bc_export import export
 st.set_page_config(
     page_title="Ramp → Business Central Export",
     page_icon="💳",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-st.title("💳 Ramp → Business Central Journal Export")
-st.markdown("Export Ramp transactions, bills, reimbursements, and statements to Business Central General Journal format.")
+# Custom CSS for improved styling
+st.markdown("""
+<style>
+    /* Main header styling */
+    .main-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .main-header h1 {
+        color: white;
+        margin: 0;
+        font-size: 2.5rem;
+        font-weight: 700;
+    }
+    .main-header p {
+        color: rgba(255, 255, 255, 0.9);
+        margin: 0.5rem 0 0 0;
+        font-size: 1.1rem;
+    }
+    
+    /* Card styling */
+    .info-card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        margin: 1rem 0;
+    }
+    
+    /* Button styling */
+    .stButton>button {
+        border-radius: 6px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+    
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
+    }
+    [data-testid="stSidebar"] .sidebar-content {
+        padding: 1rem;
+    }
+    
+    /* Success/Error message styling */
+    .stSuccess, .stError, .stWarning, .stInfo {
+        border-radius: 6px;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    
+    /* Data preview table */
+    .dataframe {
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+    
+    /* Footer styling */
+    .footer {
+        text-align: center;
+        padding: 2rem 0;
+        color: #6c757d;
+        border-top: 1px solid #e9ecef;
+        margin-top: 3rem;
+    }
+    
+    /* Auth page styling */
+    .auth-container {
+        max-width: 600px;
+        margin: 4rem auto;
+        padding: 3rem;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+        text-align: center;
+    }
+    .auth-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+    }
+    .auth-title {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #1f2937;
+        margin-bottom: 0.5rem;
+    }
+    .auth-subtitle {
+        color: #6b7280;
+        margin-bottom: 2rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Header with gradient background
+st.markdown("""
+<div class="main-header">
+    <h1>💳 Ramp → Business Central Export</h1>
+    <p>Streamlined financial data export for Business Central General Journal</p>
+</div>
+""", unsafe_allow_html=True)
 
 # Load configuration
 try:
@@ -189,16 +323,32 @@ try:
         }
 
     cfg = load_config()
-    st.success("✅ Configuration loaded successfully")
+    # Silent config load - only show errors
 except Exception as e:
     st.error("❌ Configuration error. Please contact administrator.")
+    st.markdown("*Unable to load required configuration files. Please ensure all settings are properly configured.*")
     st.stop()
 
+# Welcome message in main area
+st.markdown("""
+<div class="info-card">
+    <h3>🚀 Getting Started</h3>
+    <p>Configure your export settings in the sidebar, then click <strong>Run Export</strong> to fetch and download your financial data.</p>
+    <ul>
+        <li>✅ Secure Microsoft SSO authentication</li>
+        <li>✅ Direct integration with Ramp API</li>
+        <li>✅ Business Central-ready format</li>
+        <li>✅ Support for multiple data types</li>
+    </ul>
+</div>
+""", unsafe_allow_html=True)
+
 # Sidebar for configuration
-st.sidebar.header("Export Settings")
+st.sidebar.markdown("### ⚙️ Export Settings")
+st.sidebar.markdown("")
 
 # Date range selection
-st.sidebar.subheader("Date Range")
+st.sidebar.markdown("#### 📅 Date Range")
 col1, col2 = st.sidebar.columns(2)
 
 with col1:
@@ -216,13 +366,14 @@ with col2:
     )
 
 # Data type selection
-st.sidebar.subheader("Data Types to Export")
+st.sidebar.markdown("")
+st.sidebar.markdown("#### 📊 Data Types to Export")
 data_types = {
-    'transactions': 'Transactions',
-    'bills': 'Bills',
-    'reimbursements': 'Reimbursements',
-    'cashbacks': 'Cashbacks',
-    'statements': 'Statements'
+    'transactions': '💳 Transactions',
+    'bills': '📄 Bills',
+    'reimbursements': '💰 Reimbursements',
+    'cashbacks': '🎁 Cashbacks',
+    'statements': '📋 Statements'
 }
 
 selected_types = []
@@ -431,6 +582,10 @@ if st.sidebar.button("🚀 Run Export", type="primary", use_container_width=True
         run_export(selected_types, start_date, end_date, cfg, env)
 
 # Footer
-st.markdown("---")
-st.markdown("Built with ❤️ for Northwest Area Foundation")
-st.markdown("*This tool exports Ramp data to Business Central General Journal format with proper accounting treatment.*")
+st.markdown("""
+<div class="footer">
+    <p><strong>Built with ❤️ for Northwest Area Foundation</strong></p>
+    <p style="margin-top: 0.5rem; font-size: 0.9rem;">Secure export tool for Ramp → Business Central General Journal with proper accounting treatment</p>
+    <p style="margin-top: 1rem; font-size: 0.85rem; color: #9ca3af;">🔒 Protected by Microsoft Azure AD SSO | 📊 Real-time Ramp API integration</p>
+</div>
+""", unsafe_allow_html=True)
