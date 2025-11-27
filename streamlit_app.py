@@ -547,6 +547,35 @@ def run_export(selected_types, start_date, end_date, cfg, env):
             use_container_width=True
         )
 
+    # Show a manual button to mark exported transactions as synced
+    if exported_transaction_ids:
+        st.markdown("---")
+        st.subheader("Post-export actions")
+        st.write(f"{len(exported_transaction_ids)} exported transaction IDs collected for potential sync with Ramp.")
+        st.caption("Use the button below to mark exported transactions as synced in Ramp. This will be a dry run unless 'Enable live Ramp sync' is checked in the sidebar.")
+
+        if st.button("Mark as synced in Ramp", key="mark_synced_button"):
+            st.info("Starting marking process — this may take a moment...")
+            successes = 0
+            failures = 0
+            sync_ref = f"BCExport_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            progress = st.progress(0)
+            total = len(exported_transaction_ids)
+            i = 0
+            for tid in list(exported_transaction_ids):
+                i += 1
+                ok = client.mark_transaction_synced(tid, sync_reference=sync_ref)
+                if ok:
+                    successes += 1
+                else:
+                    failures += 1
+                progress.progress(i / total)
+
+            if enable_live_ramp_sync:
+                st.success(f"Ramp sync complete: {successes} succeeded, {failures} failed.")
+            else:
+                st.info(f"Dry run complete: {successes} would be marked synced (no live requests were sent).")
+
     # If requested, mark exported transactions in Ramp (dry-run unless live sync enabled)
     if mark_transactions_after_export and exported_transaction_ids:
         st.info(f"Preparing to mark {len(exported_transaction_ids)} exported transactions as synced in Ramp...")
