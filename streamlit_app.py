@@ -82,13 +82,21 @@ else:
         result = cca.acquire_token_by_authorization_code(
             code, scopes=SCOPES_SANITIZED, redirect_uri=REDIRECT_URI
         )
+        # Debug & error handling: MSAL returns an error dict when token exchange fails.
         if result and result.get("access_token"):
             st.session_state[SESSION_TOKEN_KEY] = result
             # clear query params from URL
             st.experimental_set_query_params()
             token = result
         else:
-            st.error("Authentication failed. Please try signing in again.")
+            # Surface non-sensitive MSAL error fields for debugging (no secrets).
+            err = {
+                "error": result.get("error") if isinstance(result, dict) else str(result),
+                "error_description": result.get("error_description") if isinstance(result, dict) else None,
+                "claims": result.get("claims") if isinstance(result, dict) else None,
+            }
+            st.error("Authentication failed during token exchange.")
+            st.write(err)
             st.stop()
     else:
         state = str(uuid4())
@@ -100,6 +108,18 @@ else:
 
 # Show a friendly welcome using identity claims (if available)
 id_claims = st.session_state.get(SESSION_TOKEN_KEY, {}).get("id_token_claims", {})
+# Fallback: decode id_token JWT if id_token_claims is missing
+if not id_claims:
+    id_token = st.session_state.get(SESSION_TOKEN_KEY, {}).get("id_token")
+    if id_token:
+        try:
+            import jwt
+            # decode without verifying signature (read-only claims extraction)
+            claims = jwt.decode(id_token, options={"verify_signature": False})
+            id_claims = claims
+        except Exception:
+            id_claims = {}
+
 user_name = id_claims.get("name") or id_claims.get("preferred_username") or id_claims.get("email", "User")
 st.sidebar.success(f"Welcome, {user_name}!")
 
