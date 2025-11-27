@@ -17,7 +17,15 @@ TENANT_ID = st.secrets.get("AZURE_TENANT_ID")
 REDIRECT_URI = st.secrets.get("AZURE_REDIRECT_URI")
 # Default to a non-reserved resource scope. If you need OpenID claims, set AUTH_SCOPES
 # in secrets to an appropriate scope (for example: "openid profile email User.Read").
+# Default to a non-reserved resource scope. If you need OpenID claims, set AUTH_SCOPES
+# in secrets to an appropriate scope (for example: "openid profile email User.Read").
 SCOPES = [s.strip() for s in st.secrets.get("AUTH_SCOPES", "User.Read").split(",")]
+# MSAL considers some scopes "reserved" (openid/profile/offline_access). Remove those
+# from the scopes we pass to MSAL methods; these are handled implicitly by the library/provider.
+_reserved = {"openid", "profile", "offline_access", "email"}
+SCOPES_SANITIZED = [s for s in SCOPES if s and s.lower() not in _reserved]
+if not SCOPES_SANITIZED:
+    SCOPES_SANITIZED = ["User.Read"]
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SESSION_TOKEN_KEY = "msal_token"
@@ -27,7 +35,7 @@ def build_auth_url(state: str) -> str:
     cca = msal.ConfidentialClientApplication(
         CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET
     )
-    return cca.get_authorization_request_url(scopes=SCOPES, state=state, redirect_uri=REDIRECT_URI)
+    return cca.get_authorization_request_url(scopes=SCOPES_SANITIZED, state=state, redirect_uri=REDIRECT_URI)
 
 # Ensure the secrets are configured
 if not CLIENT_ID or not TENANT_ID or not REDIRECT_URI:
