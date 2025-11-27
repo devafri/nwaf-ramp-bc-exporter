@@ -15,7 +15,9 @@ CLIENT_ID = st.secrets.get("AZURE_CLIENT_ID")
 CLIENT_SECRET = st.secrets.get("AZURE_CLIENT_SECRET")
 TENANT_ID = st.secrets.get("AZURE_TENANT_ID")
 REDIRECT_URI = st.secrets.get("AZURE_REDIRECT_URI")
-SCOPES = [s.strip() for s in st.secrets.get("AUTH_SCOPES", "openid,profile,email").split(",")]
+# Default to a non-reserved resource scope. If you need OpenID claims, set AUTH_SCOPES
+# in secrets to an appropriate scope (for example: "openid profile email User.Read").
+SCOPES = [s.strip() for s in st.secrets.get("AUTH_SCOPES", "User.Read").split(",")]
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SESSION_TOKEN_KEY = "msal_token"
@@ -37,7 +39,8 @@ token = st.session_state.get(SESSION_TOKEN_KEY)
 if token and token.get("access_token"):
     pass
 else:
-    qp = st.experimental_get_query_params()
+    # Use the stable `st.query_params` API
+    qp = st.query_params
     if "code" in qp:
         code = qp["code"][0]
         cca = msal.ConfidentialClientApplication(
