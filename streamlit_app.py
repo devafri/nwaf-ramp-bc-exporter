@@ -269,6 +269,34 @@ else:
             """)
         st.stop()
 
+        # Provide an alternative: Device code flow for users who cannot complete redirect flows
+        st.markdown("---")
+        st.subheader("Alternative sign-in (device code)")
+        st.write("If you cannot complete the redirect flow in your browser, you can authenticate using the device code method. This will open a code and verification URL you can use on another device.")
+        if st.button("Use device code flow", key="device_code_flow_button"):
+            # Start device code flow (public client)
+            try:
+                pca = msal.PublicClientApplication(CLIENT_ID, authority=AUTHORITY)
+                flow = pca.initiate_device_flow(scopes=SCOPES_SANITIZED)
+                if 'user_code' not in flow:
+                    st.error("Device flow could not be started. Check app registration and scopes.")
+                else:
+                    st.info("Follow the instructions below to sign in using another device/browser.")
+                    st.write(f"Go to: {flow['verification_uri']} and enter code: **{flow['user_code']}**")
+                    with st.spinner('Waiting for you to complete device authentication...'):
+                        result = pca.acquire_token_by_device_flow(flow)
+                    if result and result.get('access_token'):
+                        # Save into session similar to Confidential flow
+                        st.session_state[SESSION_TOKEN_KEY] = result
+                        st.session_state[TOKEN_ACQUIRED_TIME_KEY] = time.time()
+                        st.experimental_rerun()
+                    else:
+                        st.error('Device authentication did not complete. Please try again or use the browser flow.')
+            except Exception as ex:
+                st.error('Device flow failed to start. See logs for details.')
+                import logging
+                logging.exception('Device flow error')
+
 # Show a friendly welcome using identity claims (if available)
 id_claims = st.session_state.get(SESSION_TOKEN_KEY, {}).get("id_token_claims", {})
 # Fallback: decode id_token JWT if id_token_claims is missing
@@ -310,7 +338,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from utils import load_env, load_config
 from ramp_client import RampClient
-from transform import (ramp_to_bc_rows, ramp_bills_to_bc_rows,
+from transform import (ramp_credit_card_to_bc_rows, ramp_bills_to_bc_rows,
                       ramp_reimbursements_to_bc_rows, ramp_cashbacks_to_bc_rows,
                       ramp_statements_to_bc_rows)
 from bc_export import export
@@ -556,8 +584,7 @@ def run_export(selected_types, start_date, end_date, cfg, env):
 
         if st.button("Mark as synced in Ramp", key="mark_synced_button"):
             st.info("Starting marking process — this may take a moment...")
-            successes = 0
-            failures = 0
+            results = []
             sync_ref = f"BCExport_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             progress = st.progress(0)
             total = len(exported_transaction_ids)
@@ -565,35 +592,52 @@ def run_export(selected_types, start_date, end_date, cfg, env):
             for tid in list(exported_transaction_ids):
                 i += 1
                 ok = client.mark_transaction_synced(tid, sync_reference=sync_ref)
-                if ok:
-                    successes += 1
-                else:
-                    failures += 1
+                results.append({'timestamp': datetime.now().isoformat(), 'transaction_id': tid, 'ok': ok, 'message': ''})
                 progress.progress(i / total)
+
+            successes = sum(1 for r in results if r['ok'])
+            failures = len(results) - successes
 
             if enable_live_ramp_sync:
                 st.success(f"Ramp sync complete: {successes} succeeded, {failures} failed.")
             else:
                 st.info(f"Dry run complete: {successes} would be marked synced (no live requests were sent).")
 
+            # Write audit CSV and provide download
+            audit_path = _write_sync_audit(results, sync_ref, user_email=user_email)
+            if audit_path:
+                st.markdown(f"Audit CSV written to `{audit_path}`")
+                with open(audit_path, 'rb') as f:
+                    st.download_button("Download sync audit CSV", f, file_name=os.path.basename(audit_path))
+
     # If requested, mark exported transactions in Ramp (dry-run unless live sync enabled)
     if mark_transactions_after_export and exported_transaction_ids:
         st.info(f"Preparing to mark {len(exported_transaction_ids)} exported transactions as synced in Ramp...")
-        successes = 0
-        failures = 0
+        results = []
         sync_ref = f"BCExport_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
         for tid in exported_transaction_ids:
             ok = client.mark_transaction_synced(tid, sync_reference=sync_ref)
-            if ok:
-                successes += 1
-            else:
-                failures += 1
+            results.append({
+                'timestamp': datetime.now().isoformat(),
+                'transaction_id': tid,
+                'ok': ok,
+                'message': ''
+            })
+
+        audit_path = _write_sync_audit(results, sync_ref, user_email=user_email)
+
+        successes = sum(1 for r in results if r['ok'])
+        failures = len(results) - successes
 
         if enable_live_ramp_sync:
             st.success(f"Ramp sync complete: {successes} succeeded, {failures} failed.")
         else:
             st.info(f"Dry run complete: {successes} would be marked synced (no live requests were sent).")
+
+        if audit_path:
+            st.markdown(f"Audit CSV written to `{audit_path}`")
+            with open(audit_path, 'rb') as f:
+                st.download_button("Download sync audit CSV", f, file_name=os.path.basename(audit_path))
 
 def check_available_endpoints(client, cfg):
     """Check which API endpoints are available based on OAuth scopes."""
@@ -645,7 +689,7 @@ def fetch_data_for_type(client, data_type, start_date, end_date, cfg):
             if after < before:
                 st.info(f"Skipped {before-after} transactions that were already marked synced in Ramp")
 
-        df = ramp_to_bc_rows(data, cfg)
+        df = ramp_credit_card_to_bc_rows(data, cfg)
     elif data_type == 'bills':
         data = client.get_bills(
             status='APPROVED',
@@ -720,6 +764,31 @@ def fetch_data_for_type(client, data_type, start_date, end_date, cfg):
         processed_ids = []
 
     return data, df, processed_ids
+
+
+def _write_sync_audit(results: list, sync_ref: str, user_email: str = '') -> str:
+    """Write sync audit results (list of dicts) to a CSV file in the exports/ folder and return path."""
+    import csv
+    os.makedirs('exports', exist_ok=True)
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    fname = f"exports/sync_audit_{ts}.csv"
+    headers = ['timestamp', 'transaction_id', 'status', 'sync_reference', 'user_email', 'message']
+    try:
+        with open(fname, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            for r in results:
+                writer.writerow({
+                    'timestamp': r.get('timestamp', ''),
+                    'transaction_id': r.get('transaction_id', ''),
+                    'status': 'success' if r.get('ok') else 'failure',
+                    'sync_reference': sync_ref,
+                    'user_email': user_email,
+                    'message': r.get('message', '')
+                })
+        return fname
+    except Exception:
+        return ''
 
 # Export button
 st.sidebar.markdown("")

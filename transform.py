@@ -3,6 +3,7 @@
 import pandas as pd
 from typing import List, Dict, Any
 from datetime import datetime
+import os
 import json
 
 # Define the standard BC General Journal column order
@@ -11,6 +12,12 @@ BC_COLUMN_ORDER = [
     'Document Type', 'Document No.', 'Account Type', 'Account No.', 
     'Description', 'Debit Amount', 'Credit Amount', 'Bal. Account Type', 
     'Bal. Account No.', 'Department Code', 'Activity Code'
+]
+
+# Column order for the credit-card style export requested by the user
+CC_COLUMN_ORDER = [
+    'Date', 'Merchant', 'Posting Date', 'Description', 'Account Type',
+    'Account', 'Account Name', 'Department', 'Activity', 'Debit', 'Credit'
 ]
 
 def ramp_to_bc_rows(transactions: List[Dict[str, Any]], cfg: Dict[str, Any]) -> pd.DataFrame:
@@ -394,3 +401,151 @@ def ramp_statements_to_bc_rows(statements: List[Dict[str, Any]], cfg: Dict[str, 
     if df_output.empty:
         return pd.DataFrame(columns=BC_COLUMN_ORDER)
     return df_output[BC_COLUMN_ORDER]
+
+
+def ramp_credit_card_to_bc_rows(transactions: List[Dict[str, Any]], cfg: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Converts Ramp credit-card transactions into a single-line-per-transaction
+    Business Central-friendly DataFrame using the user's requested column
+    ordering and formatting. Also writes an audit CSV with exported Ramp ids
+    for traceability.
+
+    Expected mapping (per user):
+      - Date = posting_date (MM/DD/YYYY)
+      - Merchant = merchant_name
+      - Posting Date = payment date (user-definable field; falls back to transaction date)
+      - Description = description
+      - Account Type = 'G/L Account'
+      - Account = trans_gl_account (from accounting_field_selections)
+      - Account Name = ''
+      - Department = department_code or ''
+      - Activity = activity_code or ''
+      - Debit = transaction expense (positive)
+      - Credit = refunds (positive)
+    """
+    if not transactions:
+        print("No credit-card transactions provided for transformation.")
+        return pd.DataFrame()
+
+    print(f"--- Transforming {len(transactions)} credit-card transactions ---")
+
+    journal_lines = []
+    audit_rows = []
+    line_no_base = 1000
+    bc_cfg = cfg.get('business_central', {})
+
+    # Optional payment date override configured in config.toml
+    payment_date_field = bc_cfg.get('payment_date_field')
+
+    for index, t in enumerate(transactions):
+        # Amount (assume already in major units). Handle negative amounts as refunds.
+        raw_amount = t.get('amount', 0)
+        try:
+            amount_major_units = float(raw_amount)
+        except Exception:
+            amount_major_units = 0.0
+
+        is_refund = amount_major_units < 0
+        amt = abs(amount_major_units)
+
+        # Determine the primary transaction/posting date (Date column)
+        date_field = t.get('posted_at') or t.get('user_transaction_time') or t.get('created_at')
+        if date_field:
+            try:
+                date_val = datetime.strptime(str(date_field)[:10], '%Y-%m-%d')
+            except Exception:
+                # fallback to now
+                date_val = datetime.now()
+        else:
+            date_val = datetime.now()
+
+        date_str = date_val.strftime('%m/%d/%Y')
+
+        # Posting Date column: prefer configured payment date field, else use a payment_date key, else use date_field
+        posting_raw = None
+        if payment_date_field:
+            posting_raw = t.get(payment_date_field)
+        posting_raw = posting_raw or t.get('payment_date') or t.get('settled_at') or date_field
+        try:
+            posting_dt = datetime.strptime(str(posting_raw)[:10], '%Y-%m-%d')
+        except Exception:
+            posting_dt = date_val
+        posting_date_str = posting_dt.strftime('%m/%d/%Y')
+
+        merchant = t.get('merchant_name') or t.get('merchant', {}).get('name') or ''
+        description = t.get('description') or t.get('memo') or merchant or ''
+
+        # Extract GL account and dimensions from the first line item if present
+        trans_gl_account = None
+        department_code = ''
+        activity_code = ''
+        line_items = t.get('line_items', [])
+        if line_items and line_items[0].get('accounting_field_selections'):
+            for selection in line_items[0]['accounting_field_selections']:
+                # Two styles observed in other helpers: type == 'GL_ACCOUNT' or category_info.type == 'GL_ACCOUNT'
+                if selection.get('type') == 'GL_ACCOUNT' or selection.get('category_info', {}).get('type') == 'GL_ACCOUNT':
+                    trans_gl_account = str(selection.get('external_code', '')).strip()
+                elif selection.get('type') == 'OTHER' or selection.get('category_info', {}).get('type') == 'OTHER':
+                    external_id = selection.get('category_info', {}).get('external_id')
+                    if external_id == 'Department':
+                        department_code = str(selection.get('external_code', '')).strip()
+                    elif external_id == 'Activity Code':
+                        activity_code = str(selection.get('external_code', '')).strip()
+
+        if not trans_gl_account or trans_gl_account in ('None', 'null', ''):
+            print(f"⚠️ Warning: Transaction {t.get('id', index)} is missing a G/L Account code. Skipping.")
+            continue
+
+        # Debit for normal expenses, Credit for refunds (both positive numbers)
+        if is_refund:
+            gl_debit = 0.0
+            gl_credit = round(amt, 2)
+        else:
+            gl_debit = round(amt, 2)
+            gl_credit = 0.0
+
+        journal_lines.append({
+            'Date': date_str,
+            'Merchant': merchant,
+            'Posting Date': posting_date_str,
+            'Description': description,
+            'Account Type': 'G/L Account',
+            'Account': trans_gl_account,
+            'Account Name': '',
+            'Department': department_code or '',
+            'Activity': activity_code or '',
+            'Debit': gl_debit,
+            'Credit': gl_credit,
+        })
+
+        audit_rows.append({
+            'ramp_id': t.get('id'),
+            'doc_no': f"RAMP-{t.get('id', index)}",
+            'date': date_str,
+            'posting_date': posting_date_str,
+            'merchant': merchant,
+            'amount': amount_major_units,
+            'account': trans_gl_account,
+            'department': department_code or '',
+            'activity': activity_code or '',
+        })
+
+        line_no_base += 1000
+
+    df_output = pd.DataFrame(journal_lines)
+    if df_output.empty:
+        print("No valid credit-card transactions found. Returning empty DataFrame.")
+        return pd.DataFrame(columns=CC_COLUMN_ORDER)
+
+    # Ensure exports directory exists and write an audit CSV for traceability
+    exports_dir = cfg.get('exports_path', 'exports') if isinstance(cfg, dict) else 'exports'
+    os.makedirs(exports_dir, exist_ok=True)
+    ts = datetime.now().strftime('%Y%m%dT%H%M%S')
+    audit_path = os.path.join(exports_dir, f'cc_export_audit_{ts}.csv')
+    try:
+        pd.DataFrame(audit_rows).to_csv(audit_path, index=False)
+        print(f"Wrote audit CSV with exported Ramp IDs to: {audit_path}")
+    except Exception as e:
+        print(f"Failed to write audit CSV: {e}")
+
+    return df_output[CC_COLUMN_ORDER]
